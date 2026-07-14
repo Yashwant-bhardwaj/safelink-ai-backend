@@ -1,0 +1,38 @@
+[
+  {
+    "id": "usr_1h535kocy",
+    "name": "bhai",
+    "email": "yashwantbhardwaj7988810@gmail.com",
+    "password": "$2a$10$zUQSv1QYkyX3FvHjU6TxBespTUaGp123tYksoJwxkrL9pixh/K/r2",
+    "role": "Pro",
+    "plan": "Professional",
+    "apiKey": "sk_live_safelink_bdxabbhrb483galn",
+    "scansUsed": 2,
+    "scansLimit": 5000,
+    "joinedAt": "2026-07-14"
+  },
+  {
+    "id": "usr_rqz7tmkm9",
+    "name": "Yashwant",
+    "email": "yashwantbhardwaj7980@gmail.com",
+    "password": "$2a$10$tZD1JhmrMMOFV69myHqakObpq9q7m9j54MABr2URHg.ZaR31VFE0a",
+    "role": "Pro",
+    "plan": "Professional",
+    "apiKey": "sk_live_safelink_btjlrs94q2aombza",
+    "scansUsed": 0,
+    "scansLimit": 5000,
+    "joinedAt": "2026-07-14"
+  },
+  {
+    "id": "usr_d79nwfean",
+    "name": "Yashwant",
+    "email": "yawantbhardwaj7988810@gmail.com",
+    "password": "$2a$10$cO16npCaKZk03HJ.nmxv/eY8RXOSesaVsD.LdAxEWmeLTVw4s37Dq",
+    "role": "Pro",
+    "plan": "Professional",
+    "apiKey": "sk_live_safelink_p2jdkmawetkaxfco",
+    "scansUsed": 0,
+    "scansLimit": 5000,
+    "joinedAt": "2026-07-14"
+  }
+]
