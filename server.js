@@ -57,13 +57,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error occurred' })
 })
 
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`🚀 SafeLink AI backend running on http://localhost:${PORT}`)
-    console.log(`🔑 Gemini AI: ${process.env.GEMINI_API_KEY ? '✅ Key found' : '❌ GEMINI_API_KEY missing in .env'}`)
-    console.log(`🔒 Google OAuth: ${process.env.GOOGLE_CLIENT_ID ? '✅ Configured' : '⚠ Set GOOGLE_CLIENT_ID in .env'}`)
-    console.log(`🐙 GitHub OAuth: ${process.env.GITHUB_CLIENT_ID ? '✅ Configured' : '⚠ Set GITHUB_CLIENT_ID in .env'}`)
-  })
-}
 
-export default app;
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 SafeLink AI backend running on port ${PORT}`)
+})
