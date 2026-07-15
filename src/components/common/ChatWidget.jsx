@@ -1,346 +1,893 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Brain, X, Send, Sparkles, Shield, RefreshCw, Volume2, VolumeX, Copy, Download, Layers } from 'lucide-react'
-import { sendChatMessage } from '@/services/scannerService'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import {
+  Brain, X, Send, Sparkles, MessageSquare, Plus, Trash2,
+  Pin, PinOff, Search, Download, Volume2, VolumeX, Mic, MicOff,
+  Copy, RefreshCw, StopCircle, ChevronLeft, ChevronRight,
+  Shield, Lock, Code, Globe, FileText, Zap, CheckCircle,
+  Edit3, Check, ExternalLink, Layers,
+} from 'lucide-react'
+import { sendChatStream, getConversations, createConversation, updateConversation, deleteConversation } from '@/services/scannerService'
 import { useAuth } from '@/context/AuthContext'
 import toast from 'react-hot-toast'
 
-export default function ChatWidget() {
-  const [isOpen, setIsOpen] = useState(false)
-  const { user } = useAuth()
-  const [messages, setMessages] = useState(() => [
-    {
-      role: 'assistant',
-      content: localStorage.getItem('safelink-token')
-        ? 'Hello! I am your SafeLink AI Security Assistant. Ask me how to fix security headers or explain vulnerabilities from your scans!'
-        : 'Hello! I am the SafeLink AI Guest Assistant. I can help you understand security headers and web safety. Log in to run scans and analyze websites!',
-      timestamp: new Date().toISOString()
+// ── Quick action presets ───────────────────────────────────────────────────────
+
+const CYBER_PRESETS = [
+  { icon: Lock,     label: 'Nginx HSTS',    prompt: 'Generate Nginx config for HSTS and security headers' },
+  { icon: Shield,   label: 'Helmet.js',     prompt: 'Generate Express Helmet.js security middleware config' },
+  { icon: Code,     label: 'Apache Rules',  prompt: 'Generate Apache .htaccess security header rules' },
+  { icon: Globe,    label: 'Cloudflare',    prompt: 'Give me Cloudflare WAF and security recommendations' },
+  { icon: FileText, label: 'CSP Policy',    prompt: 'Generate a strict Content-Security-Policy header' },
+  { icon: Zap,      label: 'Fix Headers',   prompt: 'What security headers am I missing and how do I add them?' },
+]
+
+const SCAN_PROMPTS = [
+  'Why is the security score low?',
+  'How do I fix the CSP issue?',
+  'Explain the SSL certificate findings',
+  'What are the clickjacking risks?',
+  'Generate a security report for this scan',
+]
+
+const GENERAL_PROMPTS = [
+  'What is HSTS and why does it matter?',
+  'Explain Content-Security-Policy',
+  'How do I prevent XSS attacks?',
+  'What is SSRF and how to prevent it?',
+]
+
+// ── Markdown code block renderer ──────────────────────────────────────────────
+
+const CodeBlock = memo(({ language, children }) => {
+  const [copied, setCopied] = useState(false)
+  const code = String(children).replace(/\n$/, '')
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="relative group my-2">
+      <div className="flex items-center justify-between px-3 py-1.5 rounded-t-lg"
+        style={{ background: '#1e1e2e', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <span className="text-[10px] text-gray-500 font-mono uppercase">{language || 'code'}</span>
+        <button
+          onClick={handleCopy}
+          className="text-[10px] text-gray-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+        >
+          {copied ? <><CheckCircle size={10} className="text-green-400" /> Copied!</> : <><Copy size={10} /> Copy</>}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        language={language || 'bash'}
+        style={oneDark}
+        customStyle={{
+          margin: 0,
+          borderRadius: '0 0 8px 8px',
+          fontSize: '11px',
+          padding: '12px',
+          background: '#161622',
+        }}
+        wrapLongLines
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  )
+})
+
+// ── Message bubble ─────────────────────────────────────────────────────────────
+
+const MessageBubble = memo(({ msg, onCopy, onRegenerate, isLast, isAssistant }) => {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    onCopy(msg.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className={`flex items-start gap-2.5 ${isAssistant ? '' : 'flex-row-reverse'}`}>
+      {/* Avatar */}
+      <div className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-xs font-bold text-white ${
+        isAssistant ? 'bg-gradient-to-br from-blue-600 to-violet-600' : 'bg-gradient-to-br from-cyan-500 to-blue-500'
+      }`}>
+        {isAssistant ? <Brain size={13} /> : <span>U</span>}
+      </div>
+
+      {/* Content */}
+      <div className={`relative group max-w-[85%] min-w-0 ${isAssistant ? '' : 'items-end flex flex-col'}`}>
+        <div className={`px-3 py-2.5 rounded-2xl text-[11.5px] leading-relaxed break-words overflow-hidden ${
+          isAssistant
+            ? 'text-gray-200 bg-white/[0.04] border border-white/[0.07] rounded-tl-none'
+            : 'text-white bg-blue-500/90 rounded-tr-none'
+        }`}>
+          {isAssistant ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                code({ node, inline, className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className || '')
+                  return !inline ? (
+                    <CodeBlock language={match?.[1]}>{children}</CodeBlock>
+                  ) : (
+                    <code className="px-1 py-0.5 rounded text-cyan-300 bg-black/30 font-mono text-[10px]" {...props}>
+                      {children}
+                    </code>
+                  )
+                },
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                h1: ({ children }) => <h1 className="text-base font-bold text-white mb-2 mt-3 first:mt-0">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-sm font-bold text-white mb-2 mt-3 first:mt-0">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-xs font-bold text-white/90 mb-1.5 mt-2.5 first:mt-0">{children}</h3>,
+                ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2 text-gray-300">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2 text-gray-300">{children}</ol>,
+                li: ({ children }) => <li className="text-[11px]">{children}</li>,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-blue-500/50 pl-3 italic text-gray-400 my-2">{children}</blockquote>
+                ),
+                strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">
+                    {children}
+                  </a>
+                ),
+                table: ({ children }) => (
+                  <div className="overflow-x-auto my-2">
+                    <table className="text-[10px] w-full border-collapse">{children}</table>
+                  </div>
+                ),
+                th: ({ children }) => <th className="px-2 py-1 text-left text-gray-400 border border-white/10 bg-white/5">{children}</th>,
+                td: ({ children }) => <td className="px-2 py-1 border border-white/10">{children}</td>,
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          ) : (
+            <span>{msg.content}</span>
+          )}
+        </div>
+
+        {/* Timestamp + Actions */}
+        <div className={`flex items-center gap-1.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isAssistant ? '' : 'flex-row-reverse'}`}>
+          <span className="text-[9px] text-gray-600">
+            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <button
+            onClick={handleCopy}
+            className="p-0.5 rounded text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
+            title="Copy"
+          >
+            {copied ? <CheckCircle size={10} className="text-green-400" /> : <Copy size={10} />}
+          </button>
+          {isAssistant && isLast && onRegenerate && (
+            <button
+              onClick={onRegenerate}
+              className="p-0.5 rounded text-gray-600 hover:text-gray-300 transition-colors cursor-pointer"
+              title="Regenerate"
+            >
+              <RefreshCw size={10} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// ── Typing indicator ───────────────────────────────────────────────────────────
+
+const TypingIndicator = memo(({ streamingContent }) => (
+  <div className="flex items-start gap-2.5">
+    <div className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-blue-600 to-violet-600">
+      <Brain size={13} className="text-white" />
+    </div>
+    <div className="px-3 py-2.5 rounded-2xl rounded-tl-none bg-white/[0.04] border border-white/[0.07] max-w-[85%] min-w-[60px]">
+      {streamingContent ? (
+        <div className="text-[11.5px] text-gray-200 leading-relaxed break-words">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {streamingContent}
+          </ReactMarkdown>
+          <span className="inline-block w-1.5 h-3.5 bg-blue-400 ml-0.5 animate-pulse rounded-sm" />
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 py-1">
+          <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      )}
+    </div>
+  </div>
+))
+
+// ── Conversation sidebar item ──────────────────────────────────────────────────
+
+const ConvoItem = memo(({ convo, isActive, onSelect, onRename, onPin, onDelete }) => {
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(convo.title)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus()
+  }, [editing])
+
+  const handleRename = () => {
+    if (title.trim() && title !== convo.title) {
+      onRename(convo.id, title.trim())
     }
-  ])
-  const [inputValue, setInputValue] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [speakOutput, setSpeakOutput] = useState(false)
-  
+    setEditing(false)
+  }
+
+  return (
+    <div
+      className={`group flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all ${
+        isActive ? 'bg-blue-500/15 border border-blue-500/20' : 'hover:bg-white/[0.04] border border-transparent'
+      }`}
+      onClick={() => !editing && onSelect(convo)}
+    >
+      {convo.isPinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
+      <div className="flex-1 min-w-0">
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            onBlur={handleRename}
+            onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditing(false) }}
+            className="w-full bg-transparent text-xs text-white outline-none border-b border-blue-500/50"
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <p className="text-[11px] text-gray-300 truncate">{convo.title}</p>
+        )}
+        <p className="text-[9px] text-gray-600">
+          {new Date(convo.updatedAt).toLocaleDateString()}
+        </p>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={e => { e.stopPropagation(); setEditing(true) }}
+          className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors cursor-pointer">
+          <Edit3 size={9} />
+        </button>
+        <button onClick={e => { e.stopPropagation(); onPin(convo.id, !convo.isPinned) }}
+          className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors cursor-pointer">
+          {convo.isPinned ? <PinOff size={9} /> : <Pin size={9} />}
+        </button>
+        <button onClick={e => { e.stopPropagation(); onDelete(convo.id) }}
+          className="p-1 rounded hover:bg-red-500/10 text-gray-500 hover:text-red-400 transition-colors cursor-pointer">
+          <Trash2 size={9} />
+        </button>
+      </div>
+    </div>
+  )
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── MAIN CHAT WIDGET ──────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+export default function ChatWidget() {
+  const { user } = useAuth()
   const location = useLocation()
   const { id: routeScanId } = useParams()
-  const chatEndRef = useRef(null)
 
   const isScanPage = location.pathname.startsWith('/scan/') && routeScanId
   const activeScanId = isScanPage ? routeScanId : null
 
-  // Auto scroll
+  // ── State ─────────────────────────────────────────────────────────────────
+  const [isOpen, setIsOpen] = useState(false)
+  const [showSidebar, setShowSidebar] = useState(false)
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: user
+        ? `Hello **${user.name?.split(' ')[0]}**! 👋 I'm your **SafeLink AI Security Copilot**.\n\nI can help you:\n- 🔍 Analyze scan results\n- 🛡️ Fix security headers\n- 📋 Generate config files\n- 🚨 Explain vulnerabilities\n\nWhat would you like to investigate?`
+        : `Hello! I'm the **SafeLink AI Security Assistant**.\n\nAsk me anything about web security, SSL certificates, DNS, or security headers!\n\n*Sign in to run scans and get personalized analysis.*`,
+      timestamp: new Date().toISOString(),
+    }
+  ])
+  const [inputValue, setInputValue] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingContent, setStreamingContent] = useState('')
+  const [conversations, setConversations] = useState([])
+  const [activeConvoId, setActiveConvoId] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [speakOutput, setSpeakOutput] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [showPrompts, setShowPrompts] = useState(true)
+
+  const chatEndRef = useRef(null)
+  const inputRef = useRef(null)
+  const abortStreamRef = useRef(null)
+  const recognitionRef = useRef(null)
+
+  // ── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading, isOpen])
+  }, [messages, streamingContent, isOpen])
 
-  const speakText = (text) => {
+  // ── Load conversations when opened ────────────────────────────────────────
+  useEffect(() => {
+    if (isOpen && user) {
+      loadConversations()
+    }
+  }, [isOpen, user])
+
+  const loadConversations = async () => {
+    try {
+      const convos = await getConversations()
+      setConversations(convos)
+    } catch {
+      // Silently fail
+    }
+  }
+
+  // ── Voice Input (Web Speech API) ──────────────────────────────────────────
+  const toggleVoiceInput = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.error('Speech recognition not supported in this browser')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
+    recognition.continuous = false
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onstart = () => setIsListening(true)
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(r => r[0].transcript)
+        .join('')
+      setInputValue(transcript)
+    }
+    recognition.onend = () => {
+      setIsListening(false)
+      inputRef.current?.focus()
+    }
+    recognition.onerror = () => {
+      setIsListening(false)
+      toast.error('Voice recognition failed')
+    }
+
+    recognition.start()
+  }, [isListening])
+
+  // ── Text to Speech ────────────────────────────────────────────────────────
+  const speakText = useCallback((text) => {
     if (!speakOutput) return
     window.speechSynthesis?.cancel()
-    const cleanText = text.replace(/[#*`]/g, '') // remove markdown
-    const utterance = new SpeechSynthesisUtterance(cleanText)
+    const clean = text.replace(/[#*`_~\[\]()]/g, '').replace(/```[\s\S]*?```/g, 'code block').trim()
+    const utterance = new SpeechSynthesisUtterance(clean)
+    utterance.rate = 0.95
     window.speechSynthesis?.speak(utterance)
-  }
+  }, [speakOutput])
 
-  const generateConfigResponse = (type) => {
-    const time = new Date().toISOString()
-    let content = ''
-    if (type === 'nginx') {
-      content = `### Premium Nginx Security Header Settings\n\nAdd these parameters to your server configuration block:\n\n\`\`\`nginx\n# Enforce HTTPS connections\nadd_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;\n\n# Prevent Frame injection (Clickjacking)\nadd_header X-Frame-Options "SAMEORIGIN" always;\n\n# Enable XSS filtering policies\nadd_header X-XSS-Protection "1; mode=block" always;\n\n# Prevent MIME Sniffing exploits\nadd_header X-Content-Type-Options "nosniff" always;\n\n# Strict CSP settings\nadd_header Content-Security-Policy "default-src 'self';" always;\n\`\`\``
-    } else if (type === 'helmet') {
-      content = `### Express Node.js Helmet Configurations\n\nIntegrate Helmet middleware in your app entry file:\n\n\`\`\`javascript\nconst express = require('express');\nconst helmet = require('helmet');\nconst app = express();\n\n// Mount Helmet middleware\napp.use(helmet());\n\n// Custom CSP definition\napp.use(\n  helmet.contentSecurityPolicy({\n    directives: {\n      defaultSrc: ["'self'"],\n      scriptSrc: ["'self'", "'unsafe-inline'"],\n    },\n  })\n);\n\`\`\``
-    } else if (type === 'apache') {
-      content = `### Apache Security Header configurations\n\nConfigure these settings inside your \`.htaccess\` or \`httpd.conf\` parameters:\n\n\`\`\`apache\n<IfModule mod_headers.c>\n  # Clickjacking Mitigation\n  Header always set X-Frame-Options "SAMEORIGIN"\n  \n  # Enforce Strict Transport Security\n  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"\n  \n  # Prevent MIME Sniffing\n  Header always set X-Content-Type-Options "nosniff"\n</IfModule>\n\`\`\``
-    } else if (type === 'cloudflare') {
-      content = `### Cloudflare Security Recommendations\n\n1. **Enable HSTS**: Navigate to SSL/TLS > Edge Certificates and activate HSTS with preload settings.\n2. **Configure WAF**: Create active Firewall rules blocking requests targeting local loopback IP ranges (\`127.0.0.0/8\`, \`10.0.0.0/8\`).\n3. **Automatic HTTPS Rewrite**: Toggle automatic rewrites to resolve mixed-content alerts.`
+  // ── Stop generation ───────────────────────────────────────────────────────
+  const handleStop = useCallback(() => {
+    abortStreamRef.current?.()
+    abortStreamRef.current = null
+    if (streamingContent) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: streamingContent + '\n\n*[Response stopped]*',
+        timestamp: new Date().toISOString(),
+      }])
     }
+    setStreamingContent('')
+    setIsStreaming(false)
+    window.speechSynthesis?.cancel()
+  }, [streamingContent])
 
-    setMessages(prev => [...prev, { role: 'assistant', content, timestamp: time }])
-    speakText(content)
-  }
-
-  const generateClientSideReply = (queryText) => {
-    const query = queryText.toLowerCase()
-    
-    if (query.includes('score') || query.includes('rating') || query.includes('why')) {
-      return `As your AI Security Assistant, I've reviewed your safety score. Security ratings are calculated based on essential protocol configurations. Missing elements like HTTPS, Content-Security-Policy (CSP), or X-Frame-Options lower the rating. Ask me how to fix specific headers like CSP or clickjacking to improve your score!`
-    }
-    
-    if (query.includes('csp') || query.includes('content-security-policy') || query.includes('xss')) {
-      return `### Content-Security-Policy (CSP)\n\nCSP defends websites against Cross-Site Scripting (XSS) injections by defining which dynamic resources are permitted to load.\n\n#### Nginx configuration to resolve:\n\`\`\`nginx\nadd_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;\n\`\`\`\n\n#### Express Node.js config:\n\`\`\`javascript\napp.use(helmet.contentSecurityPolicy());\n\`\`\``
-    }
-    
-    if (query.includes('hsts') || query.includes('strict-transport-security') || query.includes('ssl') || query.includes('https')) {
-      return `### Strict-Transport-Security (HSTS)\n\nHSTS tells browsers to only interact with your site using secure HTTPS connections, preventing protocol downgrade attacks.\n\n#### Nginx configuration to resolve:\n\`\`\`nginx\nadd_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;\n\`\`\`\n\n#### Express Node.js config:\n\`\`\`javascript\napp.use(helmet.hsts({ maxAge: 31536000 }));\n\`\`\``
-    }
-    
-    if (query.includes('clickjack') || query.includes('iframe') || query.includes('x-frame-options')) {
-      return `### X-Frame-Options (Clickjacking Protection)\n\nX-Frame-Options blocks attackers from embedding your pages inside iframes on malicious sites, preventing user interaction intercepts.\n\n#### Nginx configuration to resolve:\n\`\`\`nginx\nadd_header X-Frame-Options "SAMEORIGIN" always;\n\`\`\`\n\n#### Express Node.js config:\n\`\`\`javascript\napp.use(helmet.frameguard({ action: 'sameorigin' }));\n\`\`\``
-    }
-    
-    if (query.includes('hello') || query.includes('hi') || query.includes('hey')) {
-      return `Hello! I am your SafeLink AI Security Assistant. Ask me how to fix security headers, SSL certifications, or resolve server vulnerabilities!`
-    }
-    
-    return `I've analyzed your query regarding "${queryText}". To secure your web servers, ensure you configure these essential security headers:\n\n1. **CSP**: Restricts script sources to block XSS.\n2. **HSTS**: Enforces exclusive HTTPS connections.\n3. **X-Frame-Options**: Blocks frame hijacking.\n\nLet me know if you would like code rules for Nginx or Node.js Express to configure these headers!`
-  }
-
-  const handleSend = async (e) => {
+  // ── Send message ──────────────────────────────────────────────────────────
+  const handleSend = useCallback(async (e, overrideMessage) => {
     e?.preventDefault()
-    if (!inputValue.trim() || loading) return
+    const text = (overrideMessage || inputValue).trim()
+    if (!text || isStreaming) return
 
-    const userMessage = inputValue.trim()
+    const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() }
+    setMessages(prev => [...prev, userMsg])
     setInputValue('')
-    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date().toISOString() }])
-    setLoading(true)
+    setIsStreaming(true)
+    setStreamingContent('')
+    setShowPrompts(false)
 
-    try {
-      const reply = await sendChatMessage(userMessage, activeScanId)
-      setMessages(prev => [...prev, reply])
-      speakText(reply.content)
-    } catch (err) {
-      console.warn('Backend chat failed, switching to client-side fallback:', err)
-      await new Promise(r => setTimeout(r, 600))
-      
-      const content = generateClientSideReply(userMessage)
-      setMessages(prev => [
-        ...prev,
-        {
+    let accumulated = ''
+    let convoId = activeConvoId
+
+    const abort = sendChatStream(text, {
+      scanId: activeScanId,
+      conversationId: convoId,
+      onConversationId: (id) => {
+        convoId = id
+        setActiveConvoId(id)
+      },
+      onChunk: (chunk) => {
+        accumulated += chunk
+        setStreamingContent(accumulated)
+      },
+      onDone: () => {
+        setMessages(prev => [...prev, {
           role: 'assistant',
-          content,
-          timestamp: new Date().toISOString()
-        }
-      ])
-      speakText(content)
-    } finally {
-      setLoading(false)
-    }
-  }
+          content: accumulated || 'I apologize, I could not generate a response. Please check the Gemini API key in your server .env file.',
+          timestamp: new Date().toISOString(),
+        }])
+        setStreamingContent('')
+        setIsStreaming(false)
+        abortStreamRef.current = null
+        speakText(accumulated)
+        if (user) loadConversations()
+      },
+      onError: (err) => {
+        const errorMsg = err?.includes('API key') || err?.includes('quota')
+          ? 'AI service unavailable. Please add a valid GEMINI_API_KEY to server/.env'
+          : err || 'Connection failed. Is the server running?'
+        
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `⚠️ **Error:** ${errorMsg}\n\nFor setup help:\n1. Get a key at [aistudio.google.com](https://aistudio.google.com/app/apikey)\n2. Add \`GEMINI_API_KEY=your_key\` to \`server/.env\`\n3. Restart the server`,
+          timestamp: new Date().toISOString(),
+        }])
+        setStreamingContent('')
+        setIsStreaming(false)
+        abortStreamRef.current = null
+      },
+    })
 
-  const handleCopy = (text) => {
+    abortStreamRef.current = abort
+  }, [inputValue, isStreaming, activeScanId, activeConvoId, user, speakText])
+
+  // ── Regenerate last response ──────────────────────────────────────────────
+  const handleRegenerate = useCallback(() => {
+    const userMsgs = messages.filter(m => m.role === 'user')
+    const lastUserMsg = userMsgs[userMsgs.length - 1]
+    if (!lastUserMsg) return
+    setMessages(prev => prev.slice(0, -1)) // Remove last assistant msg
+    handleSend(null, lastUserMsg.content)
+  }, [messages, handleSend])
+
+  // ── Copy ──────────────────────────────────────────────────────────────────
+  const handleCopy = useCallback((text) => {
     navigator.clipboard.writeText(text)
-    toast.success('Response copied to clipboard!')
-  }
+    toast.success('Copied to clipboard!')
+  }, [])
 
-  const handleExportChat = () => {
-    const content = messages.map(m => `[${m.role.toUpperCase()}] (${m.timestamp}): ${m.content}`).join('\n\n')
-    const element = document.createElement("a")
-    const file = new Blob([content], { type: 'text/plain' })
-    element.href = URL.createObjectURL(file)
-    element.download = `safelink_chat_history_${Date.now()}.txt`
-    document.body.appendChild(element)
-    element.click()
-    document.body.removeChild(element)
-    toast.success('Chat history exported!')
-  }
+  // ── Export chat ───────────────────────────────────────────────────────────
+  const handleExport = useCallback((format = 'txt') => {
+    let content = ''
+    const filename = `safelink_chat_${Date.now()}`
 
-  const quickPrompts = activeScanId ? [
-    { label: 'Why is the score low?', text: 'Why is the score low?' },
-    { label: 'How to fix CSP?', text: 'How do I fix the CSP issue?' },
-    { label: 'Clickjacking remediation', text: 'How do I prevent Clickjacking?' },
-  ] : [
-    { label: 'Explain HSTS', text: 'What is Strict-Transport-Security (HSTS)?' },
-    { label: 'Explain X-Frame-Options', text: 'What is X-Frame-Options?' },
-    { label: 'General safety advice', text: 'How can I secure my web servers?' },
-  ]
+    if (format === 'json') {
+      content = JSON.stringify({ messages, exportedAt: new Date().toISOString() }, null, 2)
+    } else if (format === 'md') {
+      content = `# SafeLink AI Chat Export\n\n*${new Date().toLocaleString()}*\n\n---\n\n`
+      content += messages.map(m => `**${m.role === 'user' ? 'You' : 'SafeLink AI'}:**\n\n${m.content}`).join('\n\n---\n\n')
+    } else {
+      content = messages.map(m => `[${m.role.toUpperCase()}] ${m.content}`).join('\n\n')
+    }
 
+    const blob = new Blob([content], { type: 'text/plain' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${filename}.${format}`
+    a.click()
+    toast.success(`Chat exported as .${format}`)
+  }, [messages])
+
+  // ── New conversation ──────────────────────────────────────────────────────
+  const handleNewConvo = useCallback(async () => {
+    setActiveConvoId(null)
+    setMessages([{
+      role: 'assistant',
+      content: `New conversation started! How can I assist with your security needs today?`,
+      timestamp: new Date().toISOString(),
+    }])
+    setShowPrompts(true)
+    setSearchQuery('')
+  }, [])
+
+  // ── Select conversation ───────────────────────────────────────────────────
+  const handleSelectConvo = useCallback((convo) => {
+    setActiveConvoId(convo.id)
+    const msgs = convo.messages.length > 0 ? convo.messages : [{
+      role: 'assistant',
+      content: 'Conversation loaded. How can I help?',
+      timestamp: convo.createdAt,
+    }]
+    setMessages(msgs)
+    setShowSidebar(false)
+    setShowPrompts(false)
+  }, [])
+
+  // ── Rename ────────────────────────────────────────────────────────────────
+  const handleRename = useCallback(async (id, title) => {
+    try {
+      await updateConversation(id, { title })
+      setConversations(prev => prev.map(c => c.id === id ? { ...c, title } : c))
+    } catch { toast.error('Failed to rename') }
+  }, [])
+
+  // ── Pin ───────────────────────────────────────────────────────────────────
+  const handlePin = useCallback(async (id, isPinned) => {
+    try {
+      await updateConversation(id, { isPinned })
+      setConversations(prev => prev.map(c => c.id === id ? { ...c, isPinned } : c))
+    } catch { toast.error('Failed to update pin') }
+  }, [])
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDeleteConvo = useCallback(async (id) => {
+    try {
+      await deleteConversation(id)
+      setConversations(prev => prev.filter(c => c.id !== id))
+      if (activeConvoId === id) handleNewConvo()
+    } catch { toast.error('Failed to delete') }
+  }, [activeConvoId, handleNewConvo])
+
+  // ── Filtered conversations ─────────────────────────────────────────────────
+  const filteredConvos = conversations.filter(c =>
+    c.title.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+  const pinnedConvos = filteredConvos.filter(c => c.isPinned)
+  const unpinnedConvos = filteredConvos.filter(c => !c.isPinned)
+
+  // ── Keyboard shortcut ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsOpen(p => !p)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const quickPrompts = activeScanId ? SCAN_PROMPTS : GENERAL_PROMPTS
+
+  // ══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="fixed bottom-6 right-6 z-50 font-sans">
+    <div className="fixed bottom-6 right-6 z-50 font-sans select-none">
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            initial={{ opacity: 0, scale: 0.92, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="w-80 sm:w-96 h-[540px] rounded-2xl flex flex-col shadow-2xl overflow-hidden glass mb-4"
+            exit={{ opacity: 0, scale: 0.92, y: 16 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            className="mb-4 flex rounded-2xl overflow-hidden shadow-2xl"
+            style={{
+              width: showSidebar ? '680px' : '380px',
+              height: '580px',
+              maxWidth: 'calc(100vw - 24px)',
+              background: 'rgba(10, 12, 24, 0.95)',
+              backdropFilter: 'blur(40px) saturate(180%)',
+              border: '0.5px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 8px 60px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(255,255,255,0.05)',
+            }}
           >
-            {/* Header */}
-            <div className="p-4 flex items-center justify-between border-b border-white/[0.08] bg-white/[0.02]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-500/10 border border-blue-500/20">
-                  <Brain size={16} className="text-blue-400 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    Security AI Assistant <Sparkles size={12} className="text-cyan-400 animate-pulse" />
-                  </h4>
-                  <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider block">
-                    {activeScanId ? 'Active Report context' : 'General advisor'}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-1">
-                {/* Voice toggle */}
-                <button
-                  onClick={() => {
-                    const next = !speakOutput
-                    setSpeakOutput(next)
-                    if (!next) window.speechSynthesis?.cancel()
-                    toast.success(next ? 'Voice output enabled 🔊' : 'Voice output muted 🔇')
-                  }}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${speakOutput ? 'text-blue-400 bg-blue-500/10' : 'text-gray-500 hover:text-white'}`}
-                  aria-label="Toggle voice output"
+            {/* ── Sidebar ─────────────────────────────────────────────────── */}
+            <AnimatePresence>
+              {showSidebar && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 220, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col border-r flex-shrink-0 overflow-hidden"
+                  style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}
                 >
-                  {speakOutput ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                </button>
-                {/* Export chat */}
-                <button
-                  onClick={handleExportChat}
-                  className="p-1.5 rounded-lg text-gray-500 hover:text-white transition-all cursor-pointer"
-                  aria-label="Export chat logs"
-                >
-                  <Download size={14} />
-                </button>
-                {/* Close */}
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                  aria-label="Close panel"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            </div>
+                  {/* Sidebar Header */}
+                  <div className="px-3 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                    <button
+                      onClick={handleNewConvo}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-semibold text-white cursor-pointer transition-all hover:opacity-90"
+                      style={{ background: 'linear-gradient(135deg, #0A84FF, #5E5CE6)' }}
+                    >
+                      <Plus size={12} /> New Chat
+                    </button>
+                  </div>
 
-            {/* Message Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/10">
-              {messages.map((msg, index) => {
-                const isAssistant = msg.role === 'assistant'
-                return (
-                  <div key={index} className={`flex items-start gap-2.5 ${isAssistant ? '' : 'flex-row-reverse'}`}>
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold text-white ${
-                      isAssistant ? 'bg-blue-600' : 'bg-cyan-600'
-                    }`}>
-                      {isAssistant ? <Brain size={14} /> : 'U'}
+                  {/* Search */}
+                  <div className="px-3 py-2">
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <Search size={10} className="text-gray-500 flex-shrink-0" />
+                      <input
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder="Search chats..."
+                        className="flex-1 bg-transparent text-[10px] text-gray-300 outline-none placeholder-gray-600"
+                      />
                     </div>
-                    <div className="relative group max-w-[80%]">
-                      <div className={`p-3 rounded-2xl text-[11px] leading-relaxed break-words ${
-                        isAssistant ? 'text-gray-200 bg-white/[0.03] border border-white/[0.06] rounded-tl-none' : 'text-white bg-blue-500/90 rounded-tr-none'
-                      }`}>
-                        {msg.content.split('\n').map((line, lIdx) => {
-                          if (line.startsWith('### ')) {
-                            return <h5 key={lIdx} className="font-bold text-white text-xs mt-2 mb-1">{line.replace('### ', '')}</h5>
-                          }
-                          if (line.startsWith('#### ')) {
-                            return <h6 key={lIdx} className="font-semibold text-white text-[10px] mt-2 mb-1">{line.replace('#### ', '')}</h6>
-                          }
-                          if (line.startsWith('- ') || line.startsWith('1. ')) {
-                            return <p key={lIdx} className="ml-2 pl-2 border-l border-white/10 my-1">{line}</p>
-                          }
-                          if (line.startsWith('add_header') || line.startsWith('app.use') || line.startsWith('//') || line.startsWith('#') || line.startsWith('Header')) {
-                            return <code key={lIdx} className="block font-mono text-[9px] bg-black/40 p-2 rounded my-1 text-cyan-300 overflow-x-auto">{line}</code>
-                          }
-                          return <p key={lIdx} className={line ? 'mb-1' : ''}>{
-                            line.split('**').map((chunk, cIdx) => 
-                              cIdx % 2 === 1 ? <strong key={cIdx} className="text-white font-semibold">{chunk}</strong> : chunk
-                            )
-                          }</p>
-                        })}
+                  </div>
+
+                  {/* Conversations */}
+                  <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+                    {pinnedConvos.length > 0 && (
+                      <>
+                        <p className="text-[9px] text-gray-600 font-semibold uppercase px-2 py-1">Pinned</p>
+                        {pinnedConvos.map(c => (
+                          <ConvoItem key={c.id} convo={c} isActive={activeConvoId === c.id}
+                            onSelect={handleSelectConvo} onRename={handleRename}
+                            onPin={handlePin} onDelete={handleDeleteConvo} />
+                        ))}
+                      </>
+                    )}
+                    {unpinnedConvos.length > 0 && (
+                      <>
+                        {pinnedConvos.length > 0 && <p className="text-[9px] text-gray-600 font-semibold uppercase px-2 py-1 mt-1">Recent</p>}
+                        {unpinnedConvos.map(c => (
+                          <ConvoItem key={c.id} convo={c} isActive={activeConvoId === c.id}
+                            onSelect={handleSelectConvo} onRename={handleRename}
+                            onPin={handlePin} onDelete={handleDeleteConvo} />
+                        ))}
+                      </>
+                    )}
+                    {filteredConvos.length === 0 && (
+                      <div className="text-center py-8">
+                        <MessageSquare size={20} className="text-gray-700 mx-auto mb-2" />
+                        <p className="text-[10px] text-gray-600">No conversations yet</p>
                       </div>
-                      {/* Floating hover copy button inside bubble */}
-                      <button
-                        onClick={() => handleCopy(msg.content)}
-                        className="absolute right-2 bottom-2 p-1 bg-black/60 rounded-md opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-white cursor-pointer"
-                      >
-                        <Copy size={10} />
-                      </button>
+                    )}
+                  </div>
+
+                  {/* Export buttons */}
+                  <div className="px-3 py-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                    <p className="text-[9px] text-gray-600 uppercase font-semibold mb-1.5">Export Chat</p>
+                    <div className="flex gap-1">
+                      {['txt', 'md', 'json'].map(fmt => (
+                        <button key={fmt} onClick={() => handleExport(fmt)}
+                          className="flex-1 py-1 text-[9px] font-bold rounded-lg text-gray-400 hover:text-white cursor-pointer transition-all"
+                          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          .{fmt}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                )
-              })}
-              
-              {loading && (
-                <div className="flex items-start gap-2.5">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-blue-600 flex-shrink-0 text-white">
-                    <Brain size={14} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── Main Chat Area ───────────────────────────────────────────── */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+                style={{ borderColor: 'rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.01)' }}>
+                <div className="flex items-center gap-2.5">
+                  {/* Sidebar Toggle */}
+                  {user && (
+                    <button
+                      onClick={() => setShowSidebar(p => !p)}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                      title="Chat History"
+                    >
+                      {showSidebar ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                  )}
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg, rgba(10,132,255,0.2), rgba(94,92,230,0.2))', border: '1px solid rgba(10,132,255,0.3)' }}>
+                    <Brain size={16} className="text-blue-400" />
                   </div>
-                  <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <div>
+                    <h4 className="text-[12px] font-bold text-white flex items-center gap-1.5">
+                      Security AI Copilot
+                      <Sparkles size={10} className="text-cyan-400 animate-pulse" />
+                    </h4>
+                    <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider">
+                      {activeScanId ? '● Scan Context Active' : isStreaming ? '● Thinking...' : '● Ready'}
+                    </span>
                   </div>
                 </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
 
-            {/* Quick Presets for generating Nginx / Helmet configs */}
-            <div className="px-3 py-2 border-t border-white/[0.04] bg-black/20 flex flex-wrap gap-1.5">
-              {[
-                { label: 'Nginx Rule', type: 'nginx' },
-                { label: 'Helmet JS', type: 'helmet' },
-                { label: 'Apache Rule', type: 'apache' },
-                { label: 'Cloudflare Edge', type: 'cloudflare' },
-              ].map((preset) => (
-                <button
-                  key={preset.label}
-                  onClick={() => generateConfigResponse(preset.type)}
-                  className="text-[9px] font-bold px-2 py-1 rounded-lg text-blue-400 hover:text-white bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/20 transition-all cursor-pointer flex items-center gap-1"
-                >
-                  <Layers size={8} />
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Quick Prompts list (visible only when chat is short) */}
-            {messages.length <= 2 && !loading && (
-              <div className="px-4 py-2 flex flex-wrap gap-1.5 bg-black/10 border-t border-white/[0.04]">
-                {quickPrompts.map((p) => (
+                <div className="flex items-center gap-0.5">
+                  {/* Voice Output */}
                   <button
-                    key={p.label}
-                    onClick={() => { setInputValue(p.text); }}
-                    className="text-[9px] px-2 py-1 rounded-full text-gray-400 hover:text-white bg-white/[0.02] border border-white/[0.06] cursor-pointer"
+                    onClick={() => {
+                      const next = !speakOutput
+                      setSpeakOutput(next)
+                      if (!next) window.speechSynthesis?.cancel()
+                      toast.success(next ? 'Voice enabled 🔊' : 'Voice muted 🔇')
+                    }}
+                    className={`p-1.5 rounded-lg transition-all cursor-pointer ${speakOutput ? 'text-blue-400 bg-blue-500/10' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                    title="Toggle voice output"
                   >
-                    {p.label}
+                    {speakOutput ? <Volume2 size={13} /> : <VolumeX size={13} />}
                   </button>
-                ))}
+                  {/* New chat */}
+                  <button
+                    onClick={handleNewConvo}
+                    className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                    title="New chat"
+                  >
+                    <Plus size={13} />
+                  </button>
+                  {/* Close */}
+                  <button
+                    onClick={() => setIsOpen(false)}
+                    className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                    title="Close (Ctrl+K)"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
               </div>
-            )}
 
-            {/* Footer Input */}
-            <form onSubmit={handleSend} className="p-3 border-t border-white/[0.08] flex gap-2 bg-white/[0.01]">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder={activeScanId ? 'Ask about scan report...' : 'Ask a security question...'}
-                className="flex-1 bg-white/5 border border-white/[0.08] rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 outline-none focus:border-blue-500"
-                disabled={loading}
-                aria-label="Chat input message"
-              />
-              <button
-                type="submit"
-                disabled={!inputValue.trim() || loading}
-                className="w-8 h-8 rounded-xl flex items-center justify-center text-white disabled:opacity-50 transition-all hover:scale-105 cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #0A84FF, #5E5CE6)' }}
-                aria-label="Send message"
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+                style={{ background: 'rgba(0,0,0,0.15)' }}>
+                {messages.map((msg, i) => (
+                  <MessageBubble
+                    key={i}
+                    msg={msg}
+                    isAssistant={msg.role === 'assistant'}
+                    isLast={i === messages.length - 1}
+                    onCopy={handleCopy}
+                    onRegenerate={i === messages.length - 1 && msg.role === 'assistant' ? handleRegenerate : null}
+                  />
+                ))}
+
+                {isStreaming && <TypingIndicator streamingContent={streamingContent} />}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Quick Prompts */}
+              <AnimatePresence>
+                {showPrompts && messages.length <= 1 && !isStreaming && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="px-3 py-2 border-t overflow-x-auto"
+                    style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.1)' }}
+                  >
+                    <div className="flex gap-1.5 min-w-max">
+                      {quickPrompts.map((prompt) => (
+                        <button
+                          key={prompt}
+                          onClick={() => { setInputValue(prompt); inputRef.current?.focus() }}
+                          className="text-[9px] px-2.5 py-1.5 rounded-full text-gray-400 hover:text-white whitespace-nowrap transition-all cursor-pointer flex-shrink-0"
+                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Cyber preset buttons */}
+              <div className="px-3 py-2 border-t flex flex-wrap gap-1.5 flex-shrink-0"
+                style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
+                {CYBER_PRESETS.map((preset) => {
+                  const Icon = preset.icon
+                  return (
+                    <button
+                      key={preset.label}
+                      onClick={() => handleSend(null, preset.prompt)}
+                      disabled={isStreaming}
+                      className="flex items-center gap-1 text-[9px] font-bold px-2 py-1 rounded-lg text-blue-400 hover:text-white transition-all cursor-pointer disabled:opacity-40"
+                      style={{ background: 'rgba(10,132,255,0.06)', border: '1px solid rgba(10,132,255,0.15)' }}
+                      title={preset.prompt}
+                    >
+                      <Icon size={8} />
+                      {preset.label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Input */}
+              <form
+                onSubmit={handleSend}
+                className="px-3 pb-3 pt-2 flex gap-2 flex-shrink-0"
+                style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
               >
-                <Send size={14} />
-              </button>
-            </form>
+                <div className="flex-1 flex items-end gap-1.5 rounded-xl px-3 py-2"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={e => setInputValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSend(e)
+                      }
+                    }}
+                    placeholder={activeScanId ? 'Ask about this scan...' : 'Ask a security question...'}
+                    rows={1}
+                    className="flex-1 bg-transparent text-[12px] text-white placeholder-gray-600 outline-none resize-none"
+                    style={{ maxHeight: '80px' }}
+                    disabled={isStreaming}
+                    aria-label="Chat message input"
+                  />
+                  {/* Voice input */}
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    className={`p-1 rounded-lg transition-all cursor-pointer flex-shrink-0 ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-600 hover:text-gray-300'}`}
+                    title="Voice input"
+                  >
+                    {isListening ? <MicOff size={13} /> : <Mic size={13} />}
+                  </button>
+                </div>
+
+                {/* Send / Stop button */}
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0 cursor-pointer transition-all hover:scale-105"
+                    style={{ background: 'linear-gradient(135deg, #EF4444, #DC2626)' }}
+                    title="Stop generation"
+                  >
+                    <StopCircle size={15} />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!inputValue.trim()}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white disabled:opacity-40 transition-all hover:scale-105 flex-shrink-0 cursor-pointer"
+                    style={{ background: 'linear-gradient(135deg, #0A84FF, #5E5CE6)' }}
+                    title="Send (Enter)"
+                  >
+                    <Send size={14} />
+                  </button>
+                )}
+              </form>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Floating Toggle Button */}
+      {/* ── Floating Toggle Button ───────────────────────────────────────── */}
       <motion.button
         onClick={() => setIsOpen(p => !p)}
         whileHover={{ scale: 1.08 }}
         whileTap={{ scale: 0.92 }}
-        className="w-16 h-16 rounded-full flex items-center justify-center text-white shadow-[0_0_25px_rgba(10,132,255,0.4)] border border-white/20 relative group cursor-pointer"
-        style={{ background: 'linear-gradient(135deg, #0A84FF, #5E5CE6)' }}
-        aria-label="Toggle chat"
+        className="w-16 h-16 rounded-full flex items-center justify-center text-white relative cursor-pointer"
+        style={{
+          background: 'linear-gradient(135deg, #0A84FF, #5E5CE6)',
+          boxShadow: '0 0 30px rgba(10,132,255,0.4), 0 4px 20px rgba(0,0,0,0.5)',
+          border: '0.5px solid rgba(255,255,255,0.2)',
+        }}
+        aria-label="Toggle Security AI Chat (Ctrl+K)"
+        title="Security AI Chat (Ctrl+K)"
       >
-        <div className="absolute inset-0 rounded-full bg-blue-500/20 animate-pulse" style={{ transform: 'scale(1.15)', zIndex: -1 }} />
+        {/* Pulse ring */}
+        <div className="absolute inset-0 rounded-full animate-ping opacity-20"
+          style={{ background: 'radial-gradient(circle, #0A84FF, transparent)' }} />
+
         {isOpen ? (
-          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          <X size={22} />
         ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <Brain size={24} className="animate-pulse" style={{ animationDuration: '3s' }} />
         )}
-        <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow border border-white/20 animate-bounce">
+
+        {/* AI badge */}
+        <div className="absolute -top-1.5 -right-1.5 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full shadow-lg animate-bounce"
+          style={{ background: 'linear-gradient(135deg, #30D158, #0A84FF)', animationDuration: '2s' }}>
           AI
         </div>
       </motion.button>

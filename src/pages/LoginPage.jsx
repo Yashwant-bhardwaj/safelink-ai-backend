@@ -1,15 +1,17 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { motion } from 'framer-motion'
 import { Helmet } from 'react-helmet-async'
-import { Eye, EyeOff, Mail, Lock, Github, Chrome } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import toast from 'react-hot-toast'
 import Button from '@/components/common/Button'
 import Input from '@/components/common/Input'
+
+const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || ''
 
 const schema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -17,11 +19,60 @@ const schema = z.object({
   rememberMe: z.boolean().optional(),
 })
 
+// ── GitHub SVG icon (not in Lucide export as proper OAuth icon) ─────────────
+function GithubIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+    </svg>
+  )
+}
+
+// ── Google SVG icon ──────────────────────────────────────────────────────────
+function GoogleIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </svg>
+  )
+}
+
+// ── OAuth Error Banner ───────────────────────────────────────────────────────
+function OAuthErrorBanner({ error }) {
+  const messages = {
+    google_not_configured: 'Google OAuth is not configured yet. Please add GOOGLE_CLIENT_ID to your server .env',
+    github_not_configured: 'GitHub OAuth is not configured yet. Please add GITHUB_CLIENT_ID to your server .env',
+    google_denied: 'Google sign-in was cancelled.',
+    github_denied: 'GitHub sign-in was cancelled.',
+    google_failed: 'Google sign-in failed. Please try again.',
+    github_failed: 'GitHub sign-in failed. Please try again.',
+  }
+
+  if (!error || !messages[error]) return null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-start gap-2 p-3 rounded-xl mb-4 text-xs"
+      style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#FCA5A5' }}
+    >
+      <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+      <span>{messages[error]}</span>
+    </motion.div>
+  )
+}
+
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [socialLoading, setSocialLoading] = useState(null)
   const { login, isLoading } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const oauthError = searchParams.get('error')
 
   const {
     register,
@@ -29,7 +80,7 @@ export default function LoginPage() {
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { email: 'alex@safelink.ai', password: 'password123' },
+    defaultValues: { email: '', password: '' },
   })
 
   const onSubmit = async (data) => {
@@ -38,33 +89,15 @@ export default function LoginPage() {
       toast.success('Welcome back! 👋')
       navigate('/dashboard')
     } catch (err) {
-      toast.error('Invalid credentials. Please try again.')
+      toast.error(err.message || 'Invalid credentials. Please try again.')
     }
   }
 
-  const handleSocialLogin = async (provider) => {
+  // Real OAuth redirect — sends user to backend which redirects to provider
+  const handleSocialLogin = (provider) => {
     setSocialLoading(provider)
-    toast(`Connecting to ${provider === 'github' ? 'GitHub' : 'Google'} OAuth...`, { icon: '🔑' })
-    await new Promise(r => setTimeout(r, 1200))
-    
-    const mockSocialUser = {
-      id: `usr_${Math.random().toString(36).substring(2, 11)}`,
-      name: provider === 'github' ? 'Alex GitHub' : 'Alex Google',
-      email: provider === 'github' ? 'alex.git@github.com' : 'alex.gmail@google.com',
-      role: 'Pro',
-      plan: 'Professional',
-      apiKey: 'sk_live_safelink_social_oauth_key',
-      scansUsed: 12,
-      scansLimit: 5000,
-      joinedAt: new Date().toISOString().split('T')[0],
-    }
-    
-    localStorage.setItem('safelink-user', JSON.stringify(mockSocialUser))
-    localStorage.setItem('safelink-token', 'mock_jwt_token_from_oauth')
-    
-    toast.success(`Logged in with ${provider === 'github' ? 'GitHub' : 'Google'} successfully!`)
-    setSocialLoading(null)
-    window.location.href = '/dashboard'
+    const url = `${API_BASE}/api/auth/${provider}`
+    window.location.href = url
   }
 
   return (
@@ -84,26 +117,37 @@ export default function LoginPage() {
           <p className="text-gray-400 text-sm">Sign in to your SafeLink AI account</p>
         </div>
 
-        {/* Social login placeholders */}
+        {/* OAuth Error */}
+        <OAuthErrorBanner error={oauthError} />
+
+        {/* Social Login */}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <button
             type="button"
             onClick={() => handleSocialLogin('github')}
-            disabled={socialLoading !== null}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-gray-300 hover:text-white transition-all disabled:opacity-50"
+            disabled={socialLoading !== null || isLoading}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-gray-300 hover:text-white transition-all disabled:opacity-50 hover:bg-white/[0.08]"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
           >
-            <Github size={16} className={socialLoading === 'github' ? 'animate-spin' : ''} />
+            {socialLoading === 'github' ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <GithubIcon size={16} />
+            )}
             {socialLoading === 'github' ? 'Connecting...' : 'GitHub'}
           </button>
           <button
             type="button"
             onClick={() => handleSocialLogin('google')}
-            disabled={socialLoading !== null}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-gray-300 hover:text-white transition-all disabled:opacity-50"
+            disabled={socialLoading !== null || isLoading}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-gray-300 hover:text-white transition-all disabled:opacity-50 hover:bg-white/[0.08]"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
           >
-            <Chrome size={16} className={socialLoading === 'google' ? 'animate-spin' : ''} />
+            {socialLoading === 'google' ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <GoogleIcon size={16} />
+            )}
             {socialLoading === 'google' ? 'Connecting...' : 'Google'}
           </button>
         </div>
@@ -185,7 +229,7 @@ export default function LoginPage() {
         {/* Demo hint */}
         <div className="mt-4 p-3 rounded-xl text-xs text-gray-500 text-center"
           style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
-          Demo: use any email / any password to sign in
+          Demo: register a new account to get started
         </div>
       </motion.div>
     </>

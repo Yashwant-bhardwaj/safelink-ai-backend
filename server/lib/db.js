@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DB_DIR = path.resolve(__dirname, '../data')
+const DB_DIR = (process.env.VERCEL || process.env.NODE_ENV === 'production') 
+  ? '/tmp/safelink_data' 
+  : path.resolve(__dirname, '../data')
 
 // Ensure data folder exists
 if (!fs.existsSync(DB_DIR)) {
@@ -19,6 +21,19 @@ function writeJsonFile(filePath, data) {
 
 function readJsonFile(filePath, defaultData = []) {
   if (!fs.existsSync(filePath)) {
+    // On Vercel, attempt to seed from the static bundled data directory
+    if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+      const staticPath = path.resolve(__dirname, '../data', path.basename(filePath));
+      if (fs.existsSync(staticPath)) {
+        try {
+          const content = fs.readFileSync(staticPath, 'utf8');
+          writeJsonFile(filePath, JSON.parse(content));
+          return JSON.parse(content);
+        } catch (e) {
+          console.error(`Error reading static seed file ${staticPath}:`, e);
+        }
+      }
+    }
     writeJsonFile(filePath, defaultData)
     return defaultData
   }

@@ -1,1 +1,164 @@
-[]
+[
+  {
+    "id": "scan_9t6pju4o5",
+    "userId": "usr_hnsbsb6l1",
+    "url": "http://secure-bank-login.xyz/login",
+    "domain": "secure-bank-login.xyz",
+    "scannedAt": "2026-07-15T07:06:15.369Z",
+    "score": 0,
+    "isHttps": false,
+    "httpStatus": 503,
+    "responseTime": 0,
+    "redirectCount": 0,
+    "finalUrl": "http://secure-bank-login.xyz/login",
+    "metadata": {
+      "title": "",
+      "description": "",
+      "favicon": "https://www.google.com/s2/favicons?domain=secure-bank-login.xyz&sz=64",
+      "canonical": "",
+      "robots": "",
+      "charset": "UTF-8",
+      "language": "en",
+      "generator": "",
+      "viewport": "width=device-width, initial-scale=1",
+      "themeColor": ""
+    },
+    "openGraph": {},
+    "twitterCard": {},
+    "headers": {},
+    "technologies": [],
+    "redirectChain": [],
+    "securityChecks": {
+      "malware": false,
+      "phishing": false,
+      "ssl": false,
+      "dnssec": false,
+      "xssProtection": false,
+      "clickjacking": false,
+      "contentType": false,
+      "hsts": false
+    },
+    "whois": {
+      "registrar": "Unknown Registrar",
+      "createdAt": "N/A",
+      "expiresAt": "N/A",
+      "country": "N/A"
+    },
+    "performance": {
+      "ttfb": 0,
+      "fcp": 0,
+      "lcp": 0,
+      "cls": "0.000"
+    },
+    "ssl": null,
+    "geoIp": null
+  },
+  {
+    "id": "scan_vc8pdumnd",
+    "userId": "usr_hnsbsb6l1",
+    "url": "http://secure-bank-login.xyz/login",
+    "domain": "secure-bank-login.xyz",
+    "scannedAt": "2026-07-15T07:06:15.472Z",
+    "score": 0,
+    "isHttps": false,
+    "httpStatus": 503,
+    "responseTime": 0,
+    "redirectCount": 0,
+    "finalUrl": "http://secure-bank-login.xyz/login",
+    "metadata": {
+      "title": "",
+      "description": "",
+      "favicon": "https://www.google.com/s2/favicons?domain=secure-bank-login.xyz&sz=64",
+      "canonical": "",
+      "robots": "",
+      "charset": "UTF-8",
+      "language": "en",
+      "generator": "",
+      "viewport": "width=device-width, initial-scale=1",
+      "themeColor": ""
+    },
+    "openGraph": {},
+    "twitterCard": {},
+    "headers": {},
+    "technologies": [],
+    "redirectChain": [],
+    "securityChecks": {
+      "malware": false,
+      "phishing": false,
+      "ssl": false,
+      "dnssec": false,
+      "xssProtection": false,
+      "clickjacking": false,
+      "contentType": false,
+      "hsts": false
+    },
+    "whois": {
+      "registrar": "Unknown Registrar",
+      "createdAt": "N/A",
+      "expiresAt": "N/A",
+      "country": "N/A"
+    },
+    "performance": {
+      "ttfb": 0,
+      "fcp": 0,
+      "lcp": 0,
+      "cls": "0.000"
+    },
+    "ssl": null,
+    "geoIp": null
+  },
+  {
+    "id": "scan_yrtvww629",
+    "userId": "usr_hnsbsb6l1",
+    "url": "http://amazon-support.example/verify",
+    "domain": "amazon-support.example",
+    "scannedAt": "2026-07-15T07:08:14.783Z",
+    "score": 0,
+    "isHttps": false,
+    "httpStatus": 503,
+    "responseTime": 0,
+    "redirectCount": 0,
+    "finalUrl": "http://amazon-support.example/verify",
+    "metadata": {
+      "title": "",
+      "description": "",
+      "favicon": "https://www.google.com/s2/favicons?domain=amazon-support.example&sz=64",
+      "canonical": "",
+      "robots": "",
+      "charset": "UTF-8",
+      "language": "en",
+      "generator": "",
+      "viewport": "width=device-width, initial-scale=1",
+      "themeColor": ""
+    },
+    "openGraph": {},
+    "twitterCard": {},
+    "headers": {},
+    "technologies": [],
+    "redirectChain": [],
+    "securityChecks": {
+      "malware": false,
+      "phishing": false,
+      "ssl": false,
+      "dnssec": false,
+      "xssProtection": false,
+      "clickjacking": false,
+      "contentType": false,
+      "hsts": false
+    },
+    "whois": {
+      "registrar": "Unknown Registrar",
+      "createdAt": "N/A",
+      "expiresAt": "N/A",
+      "country": "N/A"
+    },
+    "performance": {
+      "ttfb": 0,
+      "fcp": 0,
+      "lcp": 0,
+      "cls": "0.000"
+    },
+    "ssl": null,
+    "geoIp": null
+  }
+]

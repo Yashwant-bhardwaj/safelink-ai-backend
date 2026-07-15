@@ -228,7 +228,7 @@ export default function HistoryPage() {
                 />
               </div>
               <button
-                className="col-span-5 flex items-center gap-1 text-left hover:text-gray-300 transition-colors cursor-pointer"
+                className="col-span-9 sm:col-span-7 md:col-span-5 flex items-center gap-1 text-left hover:text-gray-300 transition-colors cursor-pointer"
                 onClick={() => toggleSort('domain')}
               >
                 URL <SortIcon field="domain" />
@@ -273,7 +273,7 @@ export default function HistoryPage() {
                           aria-label={`Select ${scan.domain}`}
                         />
                       </div>
-                      <div className="col-span-5 flex items-center gap-3 min-w-0">
+                      <div className="col-span-9 sm:col-span-7 md:col-span-5 flex items-center gap-3 min-w-0">
                         <img
                           src={`https://www.google.com/s2/favicons?domain=${scan.domain}&sz=32`}
                           alt=""

@@ -12,39 +12,58 @@ dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 5000
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
-// Configure CORS to allow our Vite frontend
+app.set('trust proxy', 1)
+
+// ── CORS: Allow only our Vite frontend origin ──────────────
 app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: [FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }))
 
-app.use(express.json())
+app.use(express.json({ limit: '5mb' }))
 app.use(morgan('dev'))
 
-// Welcome endpoint
+// ── Welcome endpoint ───────────────────────────────────────
 app.get('/api', (req, res) => {
-  res.json({ message: 'Welcome to SafeLink AI API v1' })
+  res.json({
+    message: 'SafeLink AI API v1',
+    status: 'online',
+    ai: process.env.GEMINI_API_KEY ? 'configured' : 'missing_key',
+    oauth: {
+      google: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'missing_credentials',
+      github: process.env.GITHUB_CLIENT_ID ? 'configured' : 'missing_credentials',
+    }
+  })
 })
 
-// Route registrations
+// ── Route registrations ────────────────────────────────────
 app.use('/api/auth', authRoutes)
-app.use('/api/scan', scanRoutes) // Apply scan routes (SSRF Guard will be applied internally on scan execution)
+app.use('/api/scan', scanRoutes)
 app.use('/api/stats', statsRoutes)
 app.use('/api/ai', aiRoutes)
 
-// 404 Route handler
-app.use((req, res, next) => {
+// ── 404 handler ────────────────────────────────────────────
+app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' })
 })
 
-// Global Error handler
+// ── Global error handler ───────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err)
   res.status(500).json({ error: 'Internal server error occurred' })
 })
 
-app.listen(PORT, () => {
-  console.log(`🚀 SafeLink AI backend server running on http://localhost:${PORT}`)
-})
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 SafeLink AI backend running on http://localhost:${PORT}`)
+    console.log(`🔑 Gemini AI: ${process.env.GEMINI_API_KEY ? '✅ Key found' : '❌ GEMINI_API_KEY missing in .env'}`)
+    console.log(`🔒 Google OAuth: ${process.env.GOOGLE_CLIENT_ID ? '✅ Configured' : '⚠ Set GOOGLE_CLIENT_ID in .env'}`)
+    console.log(`🐙 GitHub OAuth: ${process.env.GITHUB_CLIENT_ID ? '✅ Configured' : '⚠ Set GITHUB_CLIENT_ID in .env'}`)
+  })
+}
+
+export default app;

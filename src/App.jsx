@@ -10,6 +10,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner'
 const LandingPage = lazy(() => import('@/pages/LandingPage'))
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
+const OAuthCallbackPage = lazy(() => import('@/pages/OAuthCallbackPage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
 const ScannerPage = lazy(() => import('@/pages/ScannerPage'))
 const ScanDetailsPage = lazy(() => import('@/pages/ScanDetailsPage'))
@@ -18,39 +19,46 @@ const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center" style={{ background: '#0B1220' }}>
+    <LoadingSpinner size="lg" />
+  </div>
+)
+
 function App() {
   return (
-    <AnimatePresence mode="wait">
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center" style={{background:'#0B1220'}}><LoadingSpinner size="lg" /></div>}>
-        <Routes>
-          {/* Landing */}
-          <Route element={<LandingLayout />}>
-            <Route path="/" element={<LandingPage />} />
-          </Route>
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        {/* Landing */}
+        <Route element={<LandingLayout />}>
+          <Route path="/" element={<LandingPage />} />
+        </Route>
 
-          {/* Auth */}
-          <Route element={<AuthLayout />}>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-          </Route>
+        {/* Auth */}
+        <Route element={<AuthLayout />}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+        </Route>
 
-          {/* App (Protected) */}
-          <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/scanner" element={<ScannerPage />} />
-              <Route path="/scan/:id" element={<ScanDetailsPage />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/profile" element={<ProfilePage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-            </Route>
-          </Route>
+        {/* OAuth Callback (standalone — no layout) */}
+        <Route path="/auth/callback" element={<OAuthCallbackPage />} />
 
-          {/* 404 */}
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </Suspense>
-    </AnimatePresence>
+        {/* App (Protected) */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/scanner" element={<ScannerPage />} />
+            <Route path="/scan/:id" element={<ScanDetailsPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Route>
+        </Route>
+
+        {/* 404 */}
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </Suspense>
   )
 }
 
